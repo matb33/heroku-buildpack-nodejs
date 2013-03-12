@@ -4,7 +4,7 @@
 cat <<EOF
 ---
 addons:
-  - mongohq:free
+  - mongohq:sandbox
 config_vars:
   PATH: bin:node_modules/.bin:/usr/local/bin:/usr/bin:/bin
 default_process_types:
