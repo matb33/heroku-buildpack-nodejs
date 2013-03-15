@@ -153,10 +153,10 @@ export CPPPATH="$INCLUDE_PATH"
 
 ## TODO -- figure out which node dependencies need to be installed
 # # install dependencies with npm
-# echo "-----> Installing dependencies with npm"
-# run_npm "install --production"
-# run_npm "rebuild"
-# echo "Dependencies installed" | indent
+echo "-----> Installing dependencies with npm"
+run_npm "install --production"
+run_npm "rebuild"
+echo "Dependencies installed" | indent
 
 ############################################
 # install meteorite
