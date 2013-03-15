@@ -1,22 +1,28 @@
-# Heroku buildpack: Meteor, npm compatible
+# Heroku buildpack: Meteorite
 
-This is a fork of the [Node.js buildpack](https://github.com/heroku/heroku-buildpack-nodejs), and I've left it nearly intact apart from manually combining the bin/* files from [Jordan Sissel's meteor buildpack](https://github.com/jordansissel/heroku-buildpack-meteor).
-
-This combination buildpack allows us to setup our Meteor project as an npm package (via package.json, as recommended by Heroku for Node.js installations on the cedar stack).
+This build pack allows you to easily deploy meteor apps to heroku using [meteorite](http://github.com/oortcloud/meteorite). It's easy to use different branches of meteor and any smart package you can lay your hands on.
 
 ## Usage
 
-```
-heroku create --stack cedar --buildpack https://github.com/matb33/heroku-buildpack-nodejs.git
-```
-
-If you get a `! Resource not found` message like I did, then split up the create into two steps (though make sure to `heroku apps:destroy` your previous attempt):
-
-```
-heroku create --stack cedar
-heroku config:add BUILDPACK_URL=https://github.com/matb33/heroku-buildpack-nodejs.git
+```bash
+heroku create --stack cedar --buildpack https://github.com/oortcloud/heroku-buildpack-meteorite.git
 ```
 
-## Example
+Then `git push` to heroku as usual.
 
-See [this project](https://github.com/matb33/heroku-meteor-npm) for an example that leverages this frankenstein buildpack.
+## NOTES
+
+You need to set the `ROOT_URL` environment variable:
+
+```bash
+heroku config:add ROOT_URL=your.domain.com
+```
+
+You can specify meteor settings by setting the `METEOR_SETTINGS` environment variable:
+
+```bash
+heroku config:add METEOR_SETTINGS='{"herp":"derp"}'
+```
+
+
+You need to have a verified account so the buildpack can add a `mongohq:sandbox` addon.

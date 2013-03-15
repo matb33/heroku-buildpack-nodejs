@@ -19,6 +19,9 @@ BUILD_DIR=$1
 CACHE_DIR=$2
 LP_DIR=`cd $(dirname $0); cd ..; pwd`
 
+[ ! -d $BUILD_DIR ] && mkdir $BUILD_DIR
+[ ! -d $CACHE_DIR ] && mkdir $CACHE_DIR
+
 function error() {
   echo " !     $*"
   exit 1
@@ -43,7 +46,7 @@ function run_npm() {
   command="$1"
 
   cd $BUILD_DIR
-  HOME="$BUILD_DIR" $VENDORED_NODE/bin/node $VENDORED_NPM/cli.js $command 2>&1 | indent
+  HOME="$BUILD_DIR" $VENDORED_NODE/bin/node $VENDORED_NODE/bin/npm $command 2>&1 | indent
 
   if [ "${PIPESTATUS[*]}" != "0 0" ]; then
     echo " !     Failed to $command dependencies with npm"
@@ -106,14 +109,9 @@ declare -A engine_versions
 declare -A engine_defaults
 declare -A engine_requests
 
-engine_defaults["node"]="0.4.7"
-engine_defaults["npm"]="1.0.106"
-
+engine_defaults["node"]="0.8.19"
 engine_versions["node"]=$(manifest_versions "nodejs")
 engine_requests["node"]=$(package_engine_version "node")
-
-engine_versions["npm"]=$(manifest_versions "npm")
-engine_requests["npm"]=$(package_engine_version "npm")
 
 echo "-----> Resolving engine versions"
 
@@ -128,84 +126,75 @@ fi
 NODE_VERSION=$(package_resolve_version "node")
 echo "Using Node.js version: ${NODE_VERSION}" | indent
 
-NPM_VERSION=$(package_resolve_version "npm")
-echo "Using npm version: ${NPM_VERSION}" | indent
-
 # cache directories
-CACHE_STORE_DIR="$CACHE_DIR/node_modules/$NODE_VERSION/$NPM_VERSION"
+CACHE_STORE_DIR="$CACHE_DIR/node_modules/$NODE_VERSION"
 CACHE_TARGET_DIR="$BUILD_DIR/node_modules"
 
 # s3 packages
 NODE_PACKAGE="http://${S3_BUCKET}.s3.amazonaws.com/nodejs-${NODE_VERSION}.tgz"
-NPM_PACKAGE="http://${S3_BUCKET}.s3.amazonaws.com/npm-${NPM_VERSION}.tgz"
 SCONS_PACKAGE="http://${S3_BUCKET}.s3.amazonaws.com/scons-${SCONS_VERSION}.tgz"
 
 # vendor directories
 VENDORED_NODE="$(mktmpdir node)"
-VENDORED_NPM="$(mktmpdir npm)"
 VENDORED_SCONS="$(mktmpdir scons)"
+VENDORED_MODULES="$(mktmpdir modules)"
 
 # download and unpack packages
 echo "-----> Fetching Node.js binaries"
 package_download "nodejs" "${NODE_VERSION}" "${VENDORED_NODE}"
-package_download "npm" "${NPM_VERSION}" "${VENDORED_NPM}"
 package_download "scons" "${SCONS_VERSION}" "${VENDORED_SCONS}"
 
-# vendor node into the slug
-PATH="$BUILD_DIR/bin:$PATH"
-echo "-----> Vendoring node into slug"
-mkdir -p "$BUILD_DIR/bin"
-cp "$VENDORED_NODE/bin/node" "$BUILD_DIR/bin/node"
-
 # setting up paths for building
-PATH="$VENDORED_SCONS:$VENDORED_NODE/bin:$PATH"
+PATH="$VENDORED_SCONS:$VENDORED_NODE/bin:$VENDORED_MODULES/bin:$PATH"
 INCLUDE_PATH="$VENDORED_NODE/include"
+export npm_config_prefix="$VENDORED_MODULES"
 export CPATH="$INCLUDE_PATH"
 export CPPPATH="$INCLUDE_PATH"
 
-# install dependencies with npm
-echo "-----> Installing dependencies with npm"
-run_npm "install --production"
-run_npm "rebuild"
-echo "Dependencies installed" | indent
+## TODO -- figure out which node dependencies need to be installed
+# # install dependencies with npm
+# echo "-----> Installing dependencies with npm"
+# run_npm "install --production"
+# run_npm "rebuild"
+# echo "Dependencies installed" | indent
 
 ############################################
-# install meteor
+# install meteorite
+############################################
+echo "-----> Installing meteorite with npm"
+run_npm "install meteorite -g"
+echo "Meteorite installed" | indent
+
+METEOR_BUILD_DIR="$BUILD_DIR/.meteor/heroku_build"
+mkdir -p "$HOME"
+############################################
+# install meteor + packages through mrt
+# bundle, and install into app/
+############################################
+cd $BUILD_DIR
+echo "Installing meteor" | indent
+HOME="$BUILD_DIR" mrt install | indent
+echo "Building meteor bundle" | indent
+HOME="$BUILD_DIR" mrt bundle $CACHE_DIR/bundle.tar.gz 2>&1 | indent
+echo "Bundled" | indent
+mkdir -p $METEOR_BUILD_DIR/app
+tar -zxf $CACHE_DIR/bundle.tar.gz --strip-components 1 -C $METEOR_BUILD_DIR/app
+rm $CACHE_DIR/bundle.tar.gz
 ############################################
 
-METEOR_HOME="$BUILD_DIR/.meteor/local"
-PATH="$METEOR_HOME/usr/bin:$METEOR_HOME/usr/lib/meteor/bin:$PATH"
+############################################
+# Prepare ENV vars
+############################################
+echo "Setting up MONGO_URL in .profile.d"
+mkdir -p $BUILD_DIR/.profile.d
+cat > $BUILD_DIR/.profile.d/mongo.sh <<EOF
+  #!/bin/sh
+  
+  export MONGO_URL=\${MONGO_URL:-\$MONGOHQ_URL};
+EOF
 
-function fetch_meteor() {
-  if [ -f "$METEOR_HOME/usr/bin/meteor" ] ; then
-    # Skip if meteor is already fetched
-    return
-  fi
-
-  eval $(curl install.meteor.com | grep '^VERSION=')
-  PACKAGE="meteor_${VERSION}-1_amd64.deb"
-
-  echo "Fetching meteor deb package"
-  curl -o "$CACHE_DIR/$PACKAGE" "http://d3sqy0vbqsdhku.cloudfront.net/${PACKAGE}"
-
-  echo "Unpacking meteor"
-  [ ! -d "$METEOR_HOME" ] && mkdir -p "$METEOR_HOME"
-  ar p "$CACHE_DIR/$PACKAGE" data.tar.gz | tar -C "$METEOR_HOME" -zxf -
-}
-
-function build() {
-  (
-    cd $BUILD_DIR
-    echo "Building meteor bundle"
-    meteor bundle $CACHE_DIR/bundle.tar.gz
-    mkdir -p $BUILD_DIR/.meteor/local/build
-    tar -zxf $CACHE_DIR/bundle.tar.gz --strip-components 1 -C $BUILD_DIR/.meteor/local/build
-    rm $CACHE_DIR/bundle.tar.gz
-  )
-}
-
-[ ! -d $BUILD_DIR ] && mkdir $BUILD_DIR
-[ ! -d $CACHE_DIR ] && mkdir $CACHE_DIR
-
-fetch_meteor
-build
+# vendor node into the slug
+PATH="$METEOR_BUILD_DIR/bin:$PATH"
+echo "-----> Vendoring node into slug"
+mkdir -p "$METEOR_BUILD_DIR/bin"
+cp "$VENDORED_NODE/bin/node" "$METEOR_BUILD_DIR/bin/node"
